@@ -31,7 +31,7 @@ Dependencies: yt-dlp[default] (includes the YouTube challenge solver), flask, wa
 requirements.txt -- PLUS a JavaScript runtime on PATH, Deno by default (https://deno.com).
 Current yt-dlp needs one to get playable YouTube streams; without it you get only the weaker
 fallback clients, and songs fail with 403 or "Requested format is not available" while Search
-still looks fine. Keep yt-dlp current too (py -m pip install -U "yt-dlp[default]"): it is
+still looks fine. Keep yt-dlp current too (re-run run_resolver.bat / run_resolver.sh, which upgrade it): it is
 usually fixed within days of YouTube changing something, and a build older than ~90 days is
 likely to be broken. At startup this program checks both, says so in the log, and plays a
 real test video. GET /status shows the same information.
@@ -113,7 +113,8 @@ PLAYLIST_OPTS = {
 STALE_DAYS = 60                       # warn when yt-dlp is older than this
 JS_RUNTIMES = ("deno", "node", "bun", "qjs")   # the runtimes yt-dlp can use; Deno is the default
 SELFTEST_VIDEO = "jNQXAC9IVRw"        # "Me at the zoo": the first YouTube upload, stable for years
-FIX_HINT = ('py -m pip install -U "yt-dlp[default]"  and install Deno (https://deno.com), '
+FIX_HINT = ('update yt-dlp (re-run run_resolver.bat / run_resolver.sh, or pip install -U "yt-dlp[default]" in the '
+            'Python that runs this) and install Deno (https://deno.com), '
             'then restart this resolver from a NEW terminal so the new PATH is seen')
 
 _selftest = {"ran": False, "ok": None, "when": None, "detail": "not run yet", "client": None}
@@ -160,8 +161,8 @@ def _hint(exc: Exception) -> str:
         return warnings[0] + " Fix: " + FIX_HINT
     msg = str(exc)
     if "not available" in msg or "403" in msg or "Sign in" in msg or "bot" in msg:
-        return "YouTube refused this request. Update yt-dlp first (py -m pip install -U \"yt-dlp[default]\"); if only this video fails it may be restricted."
-    return "Update yt-dlp first (py -m pip install -U \"yt-dlp[default]\"); if only this video fails it may be restricted."
+        return "YouTube refused this request. Update yt-dlp first (re-run run_resolver.bat / run_resolver.sh); if only this video fails it may be restricted."
+    return "Update yt-dlp first (re-run run_resolver.bat / run_resolver.sh); if only this video fails it may be restricted."
 
 
 def _build_result(info: dict, ident: str) -> dict:

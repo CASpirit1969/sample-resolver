@@ -1,7 +1,7 @@
 # Sample Jukoke resolver -- as is, no support.
 # [default] adds the YouTube challenge solver (yt-dlp-ejs). You ALSO need a JavaScript runtime
 # on PATH, Deno by default (https://deno.com) -- pip cannot install that. Keep yt-dlp current:
-#   py -m pip install -U "yt-dlp[default]"
+#   re-run run_resolver.bat / run_resolver.sh (they upgrade it), or pip install -U "yt-dlp[default]"
 yt-dlp[default]
 flask>=3.0
 waitress>=3.0

@@ -19,9 +19,12 @@ on your PATH. Current yt-dlp uses a JavaScript runtime to get playable YouTube s
 works but songs fail to play. (Node, Bun and QuickJS also work.)
 
 - Windows: double-click `run_resolver.bat`
-- macOS / Linux: `./run_resolver.sh`
+- macOS / Linux: `./run_resolver.sh` (it makes its own `.venv` folder next to the script; on Ubuntu or
+  Debian you may first need `sudo apt install python3-venv`)
 
-Or by hand: `pip install -r requirements.txt` then `python reference_resolver.py`.
+Or by hand, inside a virtual environment (`python3 -m venv .venv`, then activate it):
+`pip install -r requirements.txt` then `python reference_resolver.py`. Recent Ubuntu, Debian and macOS
+Homebrew Pythons refuse `pip install` outside a virtual environment.
 It listens on `http://127.0.0.1:8787` (this computer only). Another port: `python reference_resolver.py 9000`.
 To reach it from another device on your network: `--host 0.0.0.0` (only on a network you trust --
 anyone who can reach it can use it).
@@ -42,8 +45,9 @@ anyone who can reach it can use it).
 
 ## When something doesn't play
 
-- **Update yt-dlp first**: `python -m pip install -U "yt-dlp[default]"` (on Windows `py -m pip install -U "yt-dlp[default]"`;
-  use the same Python that runs this resolver). YouTube changes every few weeks; a yt-dlp more than about 90 days old
+- **Update yt-dlp first**: run `run_resolver.bat` or `./run_resolver.sh` again; both upgrade yt-dlp every time.
+  By hand, in the same Python that runs this resolver: `pip install -U "yt-dlp[default]"` (Windows:
+  `py -m pip install -U "yt-dlp[default]"`). YouTube changes every few weeks; a yt-dlp more than about 90 days old
   is likely broken. Most "403 Forbidden", "Requested format is not available", "no results" and "resolve failed"
   problems are fixed by a newer version. Then restart the resolver.
 - **No JavaScript runtime**: if the log says `JS runtime: NONE`, install Deno and open a new terminal. A new
