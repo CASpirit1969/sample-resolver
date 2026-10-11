@@ -1,4 +1,4 @@
-# NICE Resolver Contract v1.0
+# NICE Resolver Contract v1.1
 
 A *resolver* is a small web service that turns a search or a pasted link into playable stream URLs. A client such as Jukoke calls it over HTTP. This file describes what a resolver must answer. `reference_resolver.py` is a working implementation.
 
@@ -42,10 +42,12 @@ Response:
 Request:
 
 ```json
-{ "id": "jNQXAC9IVRw" }
+{ "id": "jNQXAC9IVRw", "max_height": 360 }
 ```
 
 `id` is either the opaque id from `/search` or a full pasted URL (anything containing `://`).
+
+`max_height` is optional (added in v1.1). It means "a stream no taller than this many pixels is enough"; a client sends it when it only needs a small picture, such as a short preview. A resolver should prefer a stream at or below that height, and must still answer with its usual stream when nothing that small exists. A resolver that does not support the field ignores it, so a client must be prepared for any size.
 
 Response, one of two shapes.
 

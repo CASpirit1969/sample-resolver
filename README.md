@@ -3,13 +3,13 @@
 **Provided as is, with no warranty and no support.** It is example code, not part of Jukoke.
 It may break whenever the sites it talks to change.
 
-Compatible with: NICE Resolver Contract v1.0.
+Compatible with: NICE Resolver Contract v1.1.
 
 Jukoke has no online song source of its own. If you want Net Search, Paste URL and playlist
 import, you point Jukoke at a small program called a *resolver*. This is one working example,
 built on the open-source [yt-dlp](https://github.com/yt-dlp/yt-dlp) library, so you can see what
 a resolver does or use it as a starting point for your own. It speaks the NICE Resolver Contract
-v1.0 (`/search`, `/resolve`, `/playlist`) using the contract's default field names, so Jukoke
+v1.1 (`/search`, `/resolve`, `/playlist`) using the contract's default field names, so Jukoke
 needs no field-mapping setup.
 
 ## Run it

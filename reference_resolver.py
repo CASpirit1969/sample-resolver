@@ -1,5 +1,5 @@
 """
-reference_resolver.py -- sample external resolver for Jukoke (NICE Resolver Contract v1.0)
+reference_resolver.py -- sample external resolver for Jukoke (NICE Resolver Contract v1.1)
 
 PROVIDED AS IS, WITHOUT WARRANTY OR SUPPORT OF ANY KIND. See LICENSE and README.md.
 This is example code for people who want to see what an external resolver can do or
@@ -94,6 +94,21 @@ RESOLVE_OPTS = {
                "bestvideo[ext=mp4][vcodec^=avc1][height<=1080]+bestaudio[ext=m4a]/"
                "bestvideo[vcodec^=avc1][height<=1080]+bestaudio[acodec^=mp4a]"),
 }
+
+def _resolve_opts(max_height=None) -> dict:
+    """RESOLVE_OPTS, or -- when the client sent the optional max_height hint (contract v1.1) -- the
+    same preferences limited to streams no taller than that. The client uses it for tiny previews, so
+    it does not have to download and decode a 1080p stream just to show a postage-stamp video. If
+    nothing that small exists the usual choice is the last resort, so a hint can never cause a failure."""
+    if not max_height:
+        return RESOLVE_OPTS
+    h = max(144, min(int(max_height), 2160))
+    fmt = (f"best[ext=mp4][vcodec^=avc1][acodec^=mp4a][height<={h}]/"
+           f"bestvideo[ext=mp4][vcodec^=avc1][height<={h}]+bestaudio[ext=m4a]/"
+           f"bestvideo[vcodec^=avc1][height<={h}]+bestaudio[acodec^=mp4a]/"
+           + RESOLVE_OPTS["format"])
+    return {**RESOLVE_OPTS, "format": fmt}
+
 
 PLAYLIST_OPTS = {
     "quiet": True,
@@ -286,8 +301,14 @@ def resolve():
     # straight to yt-dlp is ambiguous and can be misread as a search term.
     target = ident if "://" in ident else f"https://www.youtube.com/watch?v={ident}"
 
+    # Optional hint (contract v1.1): the tallest stream the client needs. Ignored if not a number.
     try:
-        info = _extract(RESOLVE_OPTS, target)
+        max_height = int(body.get("max_height") or 0) or None
+    except (TypeError, ValueError):
+        max_height = None
+
+    try:
+        info = _extract(_resolve_opts(max_height), target)
     except Exception as e:
         hint = _hint(e)
         logger.warning(f"[resolve] failed for id={ident!r}: {e}\n    -> {hint}")
