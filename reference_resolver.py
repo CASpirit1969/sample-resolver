@@ -59,6 +59,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 app = Flask(__name__)
 
+NOTICE = ("SAMPLE RESOLVER -- provided as is, with no warranty and no support. It is example code, "
+          "not part of Jukoke, and may stop working at any time. You are responsible for how you use it.")
+
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
 
@@ -239,6 +242,23 @@ def run_selftest() -> dict:
         return dict(_selftest)
 
 
+def _log_banner():
+    """A boxed notice at the top of the log, so nobody mistakes this for a supported product."""
+    width = 78
+    words, lines, cur = NOTICE.split(), [], ""
+    for w in words:
+        if cur and len(cur) + 1 + len(w) > width - 4:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = f"{cur} {w}".strip()
+    lines.append(cur)
+    logger.info("+" + "-" * (width - 2) + "+")
+    for ln in lines:
+        logger.info("| " + ln.ljust(width - 4) + " |")
+    logger.info("+" + "-" * (width - 2) + "+")
+
+
 def _log_environment():
     env = env_check()
     logger.info(f"[reference_resolver] yt-dlp {env['yt_dlp']}, JS runtime: {env['js_runtime'] or 'NONE'}, "
@@ -251,8 +271,7 @@ def _log_environment():
 
 def _log_selftest(r: dict):
     if r["ok"]:
-        logger.info(f"[reference_resolver] SELF-TEST OK -- played a real YouTube stream"
-                    f"{' (client ' + r['client'] + ')' if r['client'] else ''}")
+        logger.info("[reference_resolver] SELF-TEST OK")
     else:
         logger.warning(f"[reference_resolver] SELF-TEST FAILED -- songs will probably not play: {r['detail']}")
 
@@ -321,6 +340,15 @@ def resolve():
     return jsonify(_build_result(info, ident))
 
 
+@app.route("/", methods=["GET"])
+def home():
+    """Not part of the contract: what you see if you open this address in a browser."""
+    return (f"<!doctype html><meta charset=utf-8><title>Sample resolver</title>"
+            f"<body style='font:16px system-ui;max-width:40em;margin:2em auto;padding:0 1em'>"
+            f"<h1>Sample Jukoke resolver</h1><p><strong>{NOTICE}</strong></p>"
+            f"<p>It is running. <a href='/status'>/status</a> shows what it found on this computer.</p></body>")
+
+
 @app.route("/status", methods=["GET"])
 def status():
     """Not part of the contract: what this resolver has and whether it can really play a stream.
@@ -328,7 +356,7 @@ def status():
     if request.args.get("selftest"):
         run_selftest()
     env = env_check()
-    return jsonify({**env, "selftest": dict(_selftest),
+    return jsonify({**env, "notice": NOTICE, "selftest": dict(_selftest),
                     "ok": not env["warnings"] and _selftest["ok"] is not False})
 
 
@@ -380,6 +408,7 @@ def main():
                     help="check that this machine can play a real YouTube stream, print the result, exit")
     ap.add_argument("--no-selftest", action="store_true", help="do not run the check at startup")
     args = ap.parse_args()
+    _log_banner()
     _log_environment()
     if args.selftest:
         r = run_selftest()
