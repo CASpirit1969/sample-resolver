@@ -100,13 +100,18 @@ RESOLVE_OPTS = {
 
 def _resolve_opts(max_height=None) -> dict:
     """RESOLVE_OPTS, or -- when the client sent the optional max_height hint (contract v1.1) -- the
-    same preferences limited to streams no taller than that. The client uses it for tiny previews, so
-    it does not have to download and decode a 1080p stream just to show a postage-stamp video. If
-    nothing that small exists the usual choice is the last resort, so a hint can never cause a failure."""
+    same preferences limited to streams no taller than that, and (new in update 004) preferring 30 frames
+    a second or less. The client uses the hint for tiny previews and for playback, where a karaoke video
+    gains nothing from 1080 lines or 60 frames a second but costs a lot to download and decode. If nothing
+    that small exists the next tiers relax the frame rate, then the height, and the usual choice is the
+    last resort, so a hint can never cause a failure."""
     if not max_height:
         return RESOLVE_OPTS
     h = max(144, min(int(max_height), 2160))
-    fmt = (f"best[ext=mp4][vcodec^=avc1][acodec^=mp4a][height<={h}]/"
+    fmt = (f"best[ext=mp4][vcodec^=avc1][acodec^=mp4a][height<={h}][fps<=30]/"
+           f"bestvideo[ext=mp4][vcodec^=avc1][height<={h}][fps<=30]+bestaudio[ext=m4a]/"
+           f"bestvideo[vcodec^=avc1][height<={h}][fps<=30]+bestaudio[acodec^=mp4a]/"
+           f"best[ext=mp4][vcodec^=avc1][acodec^=mp4a][height<={h}]/"
            f"bestvideo[ext=mp4][vcodec^=avc1][height<={h}]+bestaudio[ext=m4a]/"
            f"bestvideo[vcodec^=avc1][height<={h}]+bestaudio[acodec^=mp4a]/"
            + RESOLVE_OPTS["format"])
