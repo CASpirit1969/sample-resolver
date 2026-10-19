@@ -29,6 +29,26 @@ It listens on `http://127.0.0.1:8787` (this computer only). Another port: `pytho
 To reach it from another device on your network: `--host 0.0.0.0` (only on a network you trust --
 anyone who can reach it can use it).
 
+### Options
+
+Type them after the script name (`run_resolver.bat --auto-update`, `./run_resolver.sh 9000`), or put them
+on the `OPTIONS` line at the top of the script to use them at every start. `run_resolver.bat --help` (or
+`./run_resolver.sh --help`) lists them all:
+
+| Option | What it does |
+|---|---|
+| `9000` | Listen on another port (default 8787). |
+| `--host 0.0.0.0` | Reachable from other devices on your network. Only on a network you trust. |
+| `--auto-update` | Keep yt-dlp current while the resolver runs: checked shortly after start, then every 24 hours, and loaded in place with no restart. Off by default. |
+| `--update-hours 12` | Hours between those checks (minimum 1). |
+| `--no-selftest` | Skip the test video played at startup. |
+| `--selftest` | Check that this computer can play a real stream, print the result and exit (0 = ok). |
+
+The scripts already upgrade yt-dlp every time they start, so `--auto-update` only matters if you leave the
+resolver running for days. It updates yt-dlp only, not Deno, and a failed update (no network, no permission) is
+logged and retried at the next check; `/status` shows the last result. A bad yt-dlp release can break playback
+until the next fix, which is why it is off unless you ask for it.
+
 ## Point Jukoke at it
 
 1. In Jukoke open **Setup > Song Source > Resolver**.

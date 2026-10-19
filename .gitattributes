@@ -1,0 +1,5 @@
+# Keep line endings right whatever the platform: a .sh with CRLF will not run on Linux/macOS ("bad interpreter"),
+# and a .bat wants CRLF.
+* text=auto
+*.sh  text eol=lf
+*.bat text eol=crlf

@@ -26,6 +26,8 @@ Search", enter http://127.0.0.1:8787 (or this machine's address) and use Test Co
     python reference_resolver.py --selftest         # check this machine can really play a YouTube
                                                     # stream, print the result and exit (0 = ok)
     python reference_resolver.py --no-selftest      # skip the automatic check at startup
+    python reference_resolver.py --auto-update      # keep yt-dlp current while running (see below)
+    python reference_resolver.py --auto-update --update-hours 12
 
 Dependencies: yt-dlp[default] (includes the YouTube challenge solver), flask, waitress -- see
 requirements.txt -- PLUS a JavaScript runtime on PATH, Deno by default (https://deno.com).
@@ -35,6 +37,15 @@ still looks fine. Keep yt-dlp current too (re-run run_resolver.bat / run_resolve
 usually fixed within days of YouTube changing something, and a build older than ~90 days is
 likely to be broken. At startup this program checks both, says so in the log, and plays a
 real test video. GET /status shows the same information.
+
+Automatic updates (--auto-update, off by default): a few seconds after start and then every
+--update-hours hours (default 24) this runs  pip install -U "yt-dlp[default]"  with the Python that runs
+this file. If that brings a newer yt-dlp it is loaded in place, with no restart, and the self-test is
+repeated. Songs being fetched at that moment finish on the old copy. A failure (no network, a read-only or
+"externally managed" Python, no permission) is logged, shown in /status and retried at the next interval;
+nothing else is affected. It only updates the yt-dlp package: the JavaScript runtime (Deno) is yours to keep
+current. Updating software on a schedule has its own risk (a bad release can break playback until the next
+fix), which is why it is opt-in.
 """
 
 import sys
@@ -44,8 +55,11 @@ import importlib.util
 import logging
 import re
 import shutil
+import subprocess
 import threading
 import time
+import importlib
+import importlib.metadata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -144,6 +158,88 @@ _selftest = {"ran": False, "ok": None, "when": None, "detail": "not run yet", "c
 _selftest_lock = threading.Lock()
 
 
+# ---------------------------------------------------------------------------
+# Optional automatic yt-dlp update (--auto-update). pip does the upgrade; the new copy is then loaded into
+# this running process so no restart is needed. Safe because every request builds its own YoutubeDL (see
+# the comment above SEARCH_OPTS): a request already running keeps the old module objects, the next one gets
+# the new ones.
+# ---------------------------------------------------------------------------
+
+PIP_SPEC = "yt-dlp[default]"
+_update = {"enabled": False, "hours": 24, "last_check": None, "last_result": "never checked",
+           "last_error": None, "updated_from": None, "updated_to": None, "next_check": None}
+_update_lock = threading.Lock()
+
+
+def _installed_version() -> str:
+    """What pip has on disk now (may be newer than what this process has loaded)."""
+    try:
+        return importlib.metadata.version("yt-dlp")
+    except Exception:
+        return "unknown"
+
+
+def _reload_ytdlp() -> bool:
+    """Loads the freshly installed yt-dlp (and its solver package) into this process. On any failure the old
+    modules are put back and False is returned (a restart will then pick up the new version)."""
+    global yt_dlp
+    saved = {k: v for k, v in sys.modules.items() if k == "yt_dlp" or k.startswith("yt_dlp.") or k.startswith("yt_dlp_ejs")}
+    try:
+        for k in saved:
+            del sys.modules[k]
+        importlib.invalidate_caches()
+        yt_dlp = importlib.import_module("yt_dlp")
+        yt_dlp.YoutubeDL            # touch the main class: fails loudly if the import is half-broken
+        return True
+    except Exception as e:
+        logger.warning(f"[reference_resolver] could not load the new yt-dlp in place ({e}); restart to use it")
+        for k in [k for k in sys.modules if k == "yt_dlp" or k.startswith("yt_dlp.") or k.startswith("yt_dlp_ejs")]:
+            del sys.modules[k]
+        sys.modules.update(saved)
+        yt_dlp = sys.modules["yt_dlp"]
+        return False
+
+
+def update_ytdlp_now() -> dict:
+    """One update attempt. Never raises. Returns the _update status dict."""
+    with _update_lock:
+        before = _installed_version()
+        _update["last_check"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            r = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "--disable-pip-version-check",
+                                PIP_SPEC], capture_output=True, text=True, timeout=600)
+        except Exception as e:
+            _update.update(last_result="update failed", last_error=f"could not run pip: {e}")
+            logger.warning(f"[reference_resolver] auto-update: could not run pip: {e}")
+            return dict(_update)
+        if r.returncode != 0:
+            tail = (r.stderr or r.stdout or "").strip().splitlines()[-1:] or ["pip failed"]
+            _update.update(last_result="update failed", last_error=tail[0][:200])
+            logger.warning(f"[reference_resolver] auto-update failed: {tail[0][:200]}")
+            return dict(_update)
+        after = _installed_version()
+        _update["last_error"] = None
+        if after == before:
+            _update["last_result"] = f"up to date ({after})"
+            logger.info(f"[reference_resolver] auto-update: yt-dlp {after} is current")
+            return dict(_update)
+        logger.info(f"[reference_resolver] auto-update: yt-dlp {before} -> {after}")
+        loaded = _reload_ytdlp()
+        _update.update(updated_from=before, updated_to=after,
+                       last_result=(f"updated {before} -> {after}" if loaded else f"updated {before} -> {after}; restart to use it"))
+    if loaded:
+        _log_selftest(run_selftest())        # prove the new build plays
+    return dict(_update)
+
+
+def _update_loop(first_delay: float = 10.0):
+    time.sleep(first_delay)
+    while True:
+        update_ytdlp_now()
+        _update["next_check"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() + _update["hours"] * 3600))
+        time.sleep(_update["hours"] * 3600)
+
+
 def _ytdlp_version() -> str:
     try:
         return yt_dlp.version.__version__
@@ -164,7 +260,8 @@ def env_check() -> dict:
     runtime = next((r for r in JS_RUNTIMES if shutil.which(r)), None)
     ejs = importlib.util.find_spec("yt_dlp_ejs") is not None
     warnings = []
-    if age is not None and age > STALE_DAYS:
+    newest = _update["enabled"] and str(_update["last_result"]).startswith("up to date")   # pip just said there is nothing newer
+    if age is not None and age > STALE_DAYS and not newest:
         warnings.append(f"yt-dlp {ver} is {age} days old. YouTube changes often; old builds stop "
                         f"returning playable streams.")
     if not runtime:
@@ -174,7 +271,7 @@ def env_check() -> dict:
         warnings.append('The yt-dlp challenge solver package (yt-dlp-ejs) is not installed; '
                         'install yt-dlp with its default extras: pip install -U "yt-dlp[default]"')
     return {"yt_dlp": ver, "yt_dlp_age_days": age, "js_runtime": runtime, "ejs_installed": ejs,
-            "warnings": warnings, "fix": FIX_HINT if warnings else None}
+            "warnings": warnings, "fix": FIX_HINT if warnings else None, "auto_update": dict(_update)}
 
 
 def _hint(exc: Exception) -> str:
@@ -412,10 +509,15 @@ def main():
     ap.add_argument("--selftest", action="store_true",
                     help="check that this machine can play a real YouTube stream, print the result, exit")
     ap.add_argument("--no-selftest", action="store_true", help="do not run the check at startup")
+    ap.add_argument("--auto-update", action="store_true",
+                    help="keep yt-dlp current: pip-upgrade it shortly after start and then every --update-hours")
+    ap.add_argument("--update-hours", type=float, default=24.0, help="hours between update checks (default 24, minimum 1)")
     args = ap.parse_args()
     _log_banner()
     _log_environment()
     if args.selftest:
+        if args.auto_update:
+            update_ytdlp_now()
         r = run_selftest()
         _log_selftest(r)
         sys.exit(0 if r["ok"] else 1)
@@ -423,6 +525,10 @@ def main():
         logger.warning("[reference_resolver] bound beyond this computer: anyone who can reach this "
                        "address can use it. Only do this on a network you trust.")
     logger.info(f"[reference_resolver] Serving NICE resolver contract on http://{args.host}:{args.port}")
+    if args.auto_update:
+        _update.update(enabled=True, hours=max(1.0, args.update_hours))
+        logger.info(f"[reference_resolver] auto-update ON: yt-dlp is checked every {_update['hours']:g} h")
+        threading.Thread(target=_update_loop, daemon=True, name="auto-update").start()
     if not args.no_selftest:
         threading.Thread(target=lambda: _log_selftest(run_selftest()), daemon=True, name="selftest").start()
     serve(app, host=args.host, port=args.port, threads=8)
