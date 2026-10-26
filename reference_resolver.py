@@ -325,13 +325,61 @@ def _probe(url: str, headers: dict) -> str:
         return f"stream not reachable: {e}"
 
 
+def _split_only(opts: dict) -> dict:
+    """The same options with the muxed tiers removed from the format choice, leaving only video+audio pairs."""
+    tiers = [t for t in opts["format"].split("/") if "+" in t]
+    return {**opts, "format": "/".join(tiers)} if tiers else opts
+
+
+MAX_READY_WAIT = 15.0                 # never hold a request longer than this for a stream to become ready
+
+
+def _wait_until_ready(info: dict) -> float:
+    """Some YouTube clients hand out stream URLs that the CDN refuses (HTTP 403) until a few seconds after
+    they were issued; yt-dlp records the moment as `available_at` (a Unix time) on each format and its own
+    downloader sleeps until then ("Sleeping 5.00 seconds as required by the site"). A resolver answer has to be
+    playable the moment the client gets it, so wait here, once, and the caller never sees a URL that is not
+    ready. Returns the seconds waited."""
+    fmts = info.get("requested_formats") or [info]
+    due = max((f.get("available_at") or 0) for f in fmts)
+    wait = min(MAX_READY_WAIT, due - time.time() + 0.5) if due else 0.0
+    if wait > 0:
+        logger.info(f"[reference_resolver] stream becomes available in {wait:.1f}s; waiting so the client gets a usable URL")
+        time.sleep(wait)
+        return wait
+    return 0.0
+
+
+def _resolve_checked(opts: dict, target: str, ident: str):
+    """Resolve, and make sure the answer is something Jukoke can really fetch.
+
+    The contract carries request headers for a split answer (video_headers / audio_headers) but has none for a
+    muxed one, so Jukoke fetches a muxed stream_url with no headers at all. Some YouTube clients (TVHTML5 is the
+    usual one) hand out a muxed URL that the CDN refuses unless the client's own User-Agent is sent. When a muxed
+    answer fails a header-less fetch, resolve again asking only for a video+audio pair, whose headers do travel.
+    Returns (info, result)."""
+    info = _extract(opts, target)
+    _wait_until_ready(info)
+    result = _build_result(info, ident)
+    if result.get("stream_url") and not result.get("video_url") and _probe(result["stream_url"], None):
+        try:
+            info2 = _extract(_split_only(opts), target)
+            _wait_until_ready(info2)
+            result2 = _build_result(info2, ident)
+            if result2.get("video_url") and result2.get("audio_url"):
+                logger.info("[reference_resolver] muxed URL needs headers the contract cannot carry; using a split pair")
+                return info2, result2
+        except Exception as e:
+            logger.warning(f"[reference_resolver] split fallback failed: {e}")
+    return info, result
+
+
 def run_selftest() -> dict:
     """Resolve one stable video and really fetch its stream. Records and returns the outcome."""
     with _selftest_lock:
         try:
-            info = _extract(RESOLVE_OPTS, f"https://www.youtube.com/watch?v={SELFTEST_VIDEO}")
-            res = _build_result(info, SELFTEST_VIDEO)
-            urls = [(res.get("stream_url"), info.get("http_headers"))] if res.get("stream_url") else \
+            info, res = _resolve_checked(RESOLVE_OPTS, f"https://www.youtube.com/watch?v={SELFTEST_VIDEO}", SELFTEST_VIDEO)
+            urls = [(res.get("stream_url"), None)] if res.get("stream_url") else \
                    [(res.get("video_url"), res.get("video_headers")), (res.get("audio_url"), res.get("audio_headers"))]
             problem = next((p for p in (_probe(u, h) for u, h in urls) if p), "")
             first = urls[0][0] or ""
@@ -429,7 +477,7 @@ def resolve():
         max_height = None
 
     try:
-        info = _extract(_resolve_opts(max_height), target)
+        info, result = _resolve_checked(_resolve_opts(max_height), target, ident)
     except Exception as e:
         hint = _hint(e)
         logger.warning(f"[resolve] failed for id={ident!r}: {e}\n    -> {hint}")
@@ -439,7 +487,7 @@ def resolve():
     if not info:
         return jsonify({"error": "resolve failed"}), 502
 
-    return jsonify(_build_result(info, ident))
+    return jsonify(result)
 
 
 @app.route("/", methods=["GET"])
