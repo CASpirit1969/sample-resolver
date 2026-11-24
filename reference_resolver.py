@@ -432,6 +432,30 @@ def _extract(opts: dict, target: str):
         return ydl.extract_info(target, download=False)
 
 
+def _fill_missing_channels(results: list) -> None:
+    """yt-dlp's quick search often returns no channel (uploader and channel both None). For those results, ask YouTube's
+    public oEmbed page for the channel name, in parallel and with a short timeout; a failure just leaves it empty."""
+    import json as _json
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(r):
+        vid = r.get("id") or ""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
+            return
+        url = ("https://www.youtube.com/oembed?format=json&url="
+               + urllib.parse.quote(f"https://www.youtube.com/watch?v={vid}", safe=""))
+        try:
+            with urllib.request.urlopen(url, timeout=3) as resp:
+                r["channel"] = _json.load(resp).get("author_name") or r.get("channel")
+        except Exception:
+            pass
+
+    todo = [r for r in results if not r.get("channel")]
+    if todo:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            list(ex.map(one, todo))
+
+
 @app.route("/search", methods=["GET"])
 def search():
     query = (request.args.get("q") or "").strip()
@@ -455,6 +479,7 @@ def search():
         }
         for e in entries[:limit]
     ]
+    _fill_missing_channels(results)
     return jsonify({"results": results})
 
 
