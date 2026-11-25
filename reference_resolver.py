@@ -426,34 +426,70 @@ def _log_selftest(r: dict):
         logger.warning(f"[reference_resolver] SELF-TEST FAILED -- songs will probably not play: {r['detail']}")
 
 
-def _extract(opts: dict, target: str):
+def _extract(opts: dict, target: str, process: bool = True):
     """Fresh YoutubeDL(opts) per call -- see the comment above SEARCH_OPTS for why."""
     with yt_dlp.YoutubeDL(opts) as ydl:
-        return ydl.extract_info(target, download=False)
+        return ydl.extract_info(target, download=False, process=process)
 
 
-def _fill_missing_channels(results: list) -> None:
-    """yt-dlp's quick search often returns no channel (uploader and channel both None). For those results, ask YouTube's
-    public oEmbed page for the channel name, in parallel and with a short timeout; a failure just leaves it empty."""
+_CHANNEL_CACHE = {}   # video id -> channel name; a repeat search is instant
+
+
+def _fill_missing_channels(results: list, budget: float = 6.0) -> None:
+    """yt-dlp's quick search often returns no channel. For those results, ask YouTube's public oEmbed page for it:
+    all at once, one retry each, never longer than `budget` seconds in total. oEmbed answers 401 for a video whose owner
+    turned embedding off (common for karaoke uploads); for those, yt-dlp reads the video page's channel instead (no format
+    work, so it is quick). Anything that still fails stays empty (and is printed here so it can be seen)."""
     import json as _json
-    from concurrent.futures import ThreadPoolExecutor
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor, wait
 
     def one(r):
         vid = r.get("id") or ""
         if not re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
             return
+        if vid in _CHANNEL_CACHE:
+            r["channel"] = _CHANNEL_CACHE[vid]
+            return
         url = ("https://www.youtube.com/oembed?format=json&url="
                + urllib.parse.quote(f"https://www.youtube.com/watch?v={vid}", safe=""))
+        err = None
+        for _ in range(2):
+            try:
+                with urllib.request.urlopen(url, timeout=3) as resp:
+                    name = _json.load(resp).get("author_name")
+                if name:
+                    _CHANNEL_CACHE[vid] = name
+                    r["channel"] = name
+                    return
+            except urllib.error.HTTPError as e:
+                err = e
+                if e.code in (401, 403, 404):
+                    break           # embedding is off for this video; asking again won't change that
+                _time.sleep(0.2)
+            except Exception as e:
+                err = e
+                _time.sleep(0.2)
         try:
-            with urllib.request.urlopen(url, timeout=3) as resp:
-                r["channel"] = _json.load(resp).get("author_name") or r.get("channel")
-        except Exception:
-            pass
+            info = _extract({"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True},
+                            f"https://www.youtube.com/watch?v={vid}", process=False) or {}
+            name = info.get("channel") or info.get("uploader")
+            if name:
+                _CHANNEL_CACHE[vid] = name
+                r["channel"] = name
+                return
+        except Exception as e:
+            err = e
+        print(f"[channel] oEmbed failed for {vid}: {err}", flush=True)
 
     todo = [r for r in results if not r.get("channel")]
-    if todo:
-        with ThreadPoolExecutor(max_workers=8) as ex:
-            list(ex.map(one, todo))
+    if not todo:
+        return
+    ex = ThreadPoolExecutor(max_workers=min(24, len(todo)))
+    try:
+        wait([ex.submit(one, r) for r in todo], timeout=budget)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
 
 
 @app.route("/search", methods=["GET"])
